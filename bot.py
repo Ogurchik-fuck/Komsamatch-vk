@@ -25,9 +25,6 @@ class UpdateGeo(BaseStateGroup):
 class UpdateBio(BaseStateGroup):
     WAITING_BIO = "waiting_bio"
 
-class DirectMsg(BaseStateGroup):
-    WAITING_CONTENT = "waiting_content"
-
 DISTRICTS = [
     "Центральный округ",
     "Дзёмги (Ленинский)",
@@ -202,7 +199,6 @@ async def step_target(message: Message):
         "📍 Шаг 5/7. Отправь геопозицию (покажет метры/км и время в пути), выбери район Комсомольска-на-Амуре или останься инкогнито 👇",
         keyboard=get_geo_kb()
     )
-
 @bot.on.message(state=Form.LOCATION)
 async def step_location(message: Message):
     state = await bot.state_dispenser.get(message.peer_id)
@@ -274,8 +270,8 @@ async def step_media(message: Message):
             attachments_list=atts
         )
         await bot.state_dispenser.delete(message.peer_id)
-        await message.answer("🎉 Готово! Твоя анкета опубликована в КомсаМэтч!", keyboard=get_main_menu_kb())
-        await show_next_profile(message.peer_id, message.from_id)
+        await message.answer("🎉 Готово! Твоя анкета опубликована. Вот как её видят другие 👇", keyboard=get_main_menu_kb())
+        await menu_my_profile(message)
     else:
         photos_cnt = len([x for x in atts if x.startswith("photo")])
         videos_cnt = len([x for x in atts if x.startswith("video")])
@@ -283,6 +279,7 @@ async def step_media(message: Message):
             f"✅ Принято! Сейчас в анкете: фото — {photos_cnt}/3, видео — {videos_cnt}/1.\nМожешь добавить ещё или жми «✅ Готово, опубликовать» 👇",
             keyboard=get_media_done_kb()
         )
+
 @bot.on.message(text=["🔥 Смотреть анкеты", "Смотреть анкеты"])
 async def menu_search(message: Message):
     await bot.state_dispenser.delete(message.peer_id)
@@ -319,7 +316,6 @@ async def menu_my_profile(message: Message):
     kb.row()
     kb.add(Callback("💤 Скрыть анкету из поиска", payload={"cmd": "sleep_profile"}), color=KeyboardButtonColor.NEGATIVE)
     await send_profile(message.peer_id, user, inline_kb=kb.get_json(), is_own=True)
-
 @bot.on.message(state=UpdateGeo.WAITING_GEO)
 async def save_new_geo(message: Message):
     if message.geo and message.geo.coordinates:
@@ -348,38 +344,6 @@ async def save_new_bio(message: Message):
     await db.update_bio(message.from_id, new_bio)
     await bot.state_dispenser.delete(message.peer_id)
     await message.answer("✅ Текст анкеты обновлён!", keyboard=get_main_menu_kb())
-
-@bot.on.message(state=DirectMsg.WAITING_CONTENT)
-async def send_direct_msg(message: Message):
-    txt = (message.text or "").strip()
-    if "Отмена" in txt:
-        await bot.state_dispenser.delete(message.peer_id)
-        await message.answer("Отправка отменена.", keyboard=get_main_menu_kb())
-        return
-
-    state = await bot.state_dispenser.get(message.peer_id)
-    target_id = state.payload.get("target_id")
-    sender = await db.get_user(message.from_id)
-    await bot.state_dispenser.delete(message.peer_id)
-
-    if not target_id or not sender:
-        await message.answer("Ошибка отправки.", keyboard=get_main_menu_kb())
-        return
-
-    reply_kb = Keyboard(inline=True)
-    reply_kb.add(Callback("↩️ Ответить", payload={"cmd": "msg", "uid": message.from_id}), color=KeyboardButtonColor.PRIMARY)
-    header = f"💌 Сообщение от {sender['name']}, {sender['age']} (://vk.com{message.from_id}):\n{txt}"
-    try:
-        await bot.api.messages.send(
-            peer_id=target_id,
-            message=header,
-            forward_messages=[message.id] if message.attachments else None,
-            keyboard=reply_kb.get_json(),
-            random_id=0
-        )
-        await message.answer("🚀 Доставлено!", keyboard=get_main_menu_kb())
-    except Exception:
-        await message.answer("⚠️ Не удалось доставить сообщение (пользователь запретил сообщения от сообщества).", keyboard=get_main_menu_kb())
 
 async def show_next_profile(peer_id: int, user_id: int):
     need_bio = await db.increment_views_and_check_prompt(user_id)
@@ -419,7 +383,6 @@ async def show_next_profile(peer_id: int, user_id: int):
     kb.add(Callback("❤️ Лайк", payload={"cmd": "like", "uid": tid}), color=KeyboardButtonColor.POSITIVE)
     kb.add(Callback("👎 Дальше", payload={"cmd": "pass", "uid": tid}), color=KeyboardButtonColor.NEGATIVE)
     kb.row()
-    kb.add(Callback("💌 Написать", payload={"cmd": "msg", "uid": tid}), color=KeyboardButtonColor.PRIMARY)
     kb.add(Callback("⚠️ Жалоба", payload={"cmd": "report", "uid": tid}), color=KeyboardButtonColor.SECONDARY)
     await send_profile(peer_id, profile, inline_kb=kb.get_json(), is_own=False)
 
@@ -473,31 +436,34 @@ async def handle_callbacks(event: MessageEvent):
             u1 = await db.get_user(uid)
             u2 = await db.get_user(tid)
             if u1 and u2:
-                kb1 = Keyboard(inline=True)
-                kb1.add(Callback("💌 Написать в боте", payload={"cmd": "msg", "uid": tid}), color=KeyboardButtonColor.PRIMARY)
-                kb2 = Keyboard(inline=True)
-                kb2.add(Callback("💌 Написать в боте", payload={"cmd": "msg", "uid": uid}), color=KeyboardButtonColor.PRIMARY)
-                await bot.api.messages.send(peer_id=peer_id, message=f"🎉 Бинго! Взаимная симпатия с {u2['name']}! Страница: ://vk.com{tid}", keyboard=kb1.get_json(), random_id=0)
-                await bot.api.messages.send(peer_id=tid, message=f"🎉 Бинго! Взаимная симпатия с {u1['name']}! Страница: ://vk.com{uid}", keyboard=kb2.get_json(), random_id=0)
-        elif is_like:
-            try:
-                vkb = Keyboard(inline=True)
-                vkb.add(Callback("👀 Посмотреть, кто это", payload={"cmd": "view_likes"}), color=KeyboardButtonColor.POSITIVE)
+                next_kb = Keyboard(inline=True)
+                next_kb.add(Callback("🔥 Смотреть дальше", payload={"cmd": "view_likes"}), color=KeyboardButtonColor.PRIMARY)
                 await bot.api.messages.send(
-                                        peer_id=tid,
-                    message="💘 Твоя анкета кому-то понравилась! Заканчивай с просмотром и давай посмотрим, кто поставил лайк 👇",
-                    keyboard=vkb.get_json(),
+                    peer_id=peer_id,
+                    message=f"🎉 Бинго! Взаимная симпатия с [id{tid}|{u2['name']}]!\nНажимай на имя, чтобы открыть страницу и написать в личку 💌",
+                    keyboard=next_kb.get_json(),
                     random_id=0
                 )
-            except Exception:
-                pass
-        await show_next_profile(peer_id, uid)
-    elif cmd == "msg":
-        tid = int(payload.get("uid"))
-        t_info = await db.get_user(tid)
-        if t_info:
-            await bot.state_dispenser.set(peer_id, DirectMsg.WAITING_CONTENT, target_id=tid)
-            await bot.api.messages.send(peer_id=peer_id, message=f"💌 Напиши сообщение (можно прикрепить фото или голосовое) для {t_info['name']}:", keyboard=get_cancel_kb(), random_id=0)
+                await bot.api.messages.send(
+                    peer_id=tid,
+                    message=f"🎉 Бинго! Взаимная симпатия с [id{uid}|{u1['name']}]!\nНажимай на имя, чтобы открыть страницу и написать в личку 💌",
+                    keyboard=next_kb.get_json(),
+                    random_id=0
+                )
+        else:
+            if is_like:
+                try:
+                    vkb = Keyboard(inline=True)
+                    vkb.add(Callback("👀 Посмотреть, кто это", payload={"cmd": "view_likes"}), color=KeyboardButtonColor.POSITIVE)
+                    await bot.api.messages.send(
+                        peer_id=tid,
+                        message="💘 Твоя анкета кому-то понравилась! Заканчивай с просмотром и давай посмотрим, кто поставил лайк 👇",
+                        keyboard=vkb.get_json(),
+                        random_id=0
+                    )
+                except Exception:
+                    pass
+            await show_next_profile(peer_id, uid)
     elif cmd == "report":
         tid = int(payload.get("uid"))
         await db.add_like(uid, tid, False)
@@ -508,7 +474,7 @@ async def handle_callbacks(event: MessageEvent):
             bkb.add(Callback("🚫 Забанить анкету", payload={"cmd": "ban", "uid": tid}), color=KeyboardButtonColor.NEGATIVE)
             await bot.api.messages.send(
                 peer_id=ADMIN_ID,
-                message=f"🚨 Жалоба на анкету!\nНарушитель: {t_info['name']}, {t_info['age']} (://vk.com{tid})\nОписание: {t_info['bio']}",
+                message=f"🚨 Жалоба на анкету!\nНарушитель: [id{tid}|{t_info['name']}], {t_info['age']}\nОписание: {t_info['bio']}",
                 attachment=",".join(t_info.get("attachments_list", [])) or None,
                 keyboard=bkb.get_json(),
                 random_id=0
@@ -517,7 +483,7 @@ async def handle_callbacks(event: MessageEvent):
     elif cmd == "ban" and uid == ADMIN_ID:
         tid = int(payload.get("uid"))
         await db.ban_user(tid)
-        await bot.api.messages.send(peer_id=peer_id, message=f"✅ Пользователь ://vk.com{tid} заблокирован.", random_id=0)
+        await bot.api.messages.send(peer_id=peer_id, message=f"✅ Пользователь [id{tid}|id{tid}] заблокирован.", random_id=0)
 
 async def on_startup():
     global ADMIN_ID
@@ -533,4 +499,3 @@ async def on_startup():
 
 bot.loop_wrapper.on_startup.append(on_startup())
 bot.run_forever()
-
