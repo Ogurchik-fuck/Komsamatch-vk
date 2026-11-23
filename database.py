@@ -140,10 +140,20 @@ async def get_next_profile(user_id):
                 profiles.append(p)
         if not profiles:
             return None
-        profiles.sort(key=lambda p: calc_distance_num(me.get("lat"), me.get("lon"), p.get("lat"), p.get("lon")))
+
+        my_age = me.get("age", 20)
+        def sort_key(p):
+            p_age = p.get("age", 20)
+            in_range = 0 if (my_age - 2 <= p_age <= my_age + 3) else 1
+            age_diff = abs(p_age - my_age)
+            dist = calc_distance_num(me.get("lat"), me.get("lon"), p.get("lat"), p.get("lon"))
+            return (in_range, dist, age_diff)
+
+        profiles.sort(key=sort_key)
         best = next(iter(profiles))
         best["distance_str"] = format_place(me, best)
         return best
+
 
 async def get_incoming_like(user_id):
     me = await get_user(user_id)
