@@ -10,6 +10,14 @@ ADMIN_ID = None
 
 bot = Bot(token=TOKEN)
 
+def format_people_dative(n: int) -> str:
+    if 11 <= (n % 100) <= 19:
+        return f"{n} людям"
+    last = n % 10
+    if last == 1:
+        return f"{n} человеку"
+    return f"{n} людям"
+
 class Form(BaseStateGroup):
     NAME = "name"
     AGE = "age"
@@ -199,6 +207,7 @@ async def step_target(message: Message):
         "📍 Шаг 5/7. Отправь геопозицию (покажет метры/км и время в пути), выбери район Комсомольска-на-Амуре или останься инкогнито 👇",
         keyboard=get_geo_kb()
     )
+
 @bot.on.message(state=Form.LOCATION)
 async def step_location(message: Message):
     state = await bot.state_dispenser.get(message.peer_id)
@@ -279,7 +288,6 @@ async def step_media(message: Message):
             f"✅ Принято! Сейчас в анкете: фото — {photos_cnt}/3, видео — {videos_cnt}/1.\nМожешь добавить ещё или жми «✅ Готово, опубликовать» 👇",
             keyboard=get_media_done_kb()
         )
-
 @bot.on.message(text=["🔥 Смотреть анкеты", "Смотреть анкеты"])
 async def menu_search(message: Message):
     await bot.state_dispenser.delete(message.peer_id)
@@ -316,6 +324,7 @@ async def menu_my_profile(message: Message):
     kb.row()
     kb.add(Callback("💤 Скрыть анкету из поиска", payload={"cmd": "sleep_profile"}), color=KeyboardButtonColor.NEGATIVE)
     await send_profile(message.peer_id, user, inline_kb=kb.get_json(), is_own=True)
+
 @bot.on.message(state=UpdateGeo.WAITING_GEO)
 async def save_new_geo(message: Message):
     if message.geo and message.geo.coordinates:
@@ -385,7 +394,6 @@ async def show_next_profile(peer_id: int, user_id: int):
     kb.row()
     kb.add(Callback("⚠️ Жалоба", payload={"cmd": "report", "uid": tid}), color=KeyboardButtonColor.SECONDARY)
     await send_profile(peer_id, profile, inline_kb=kb.get_json(), is_own=False)
-
 @bot.on.raw_event("message_event", dataclass=MessageEvent)
 async def handle_callbacks(event: MessageEvent):
     payload = event.object.payload or {}
@@ -453,11 +461,14 @@ async def handle_callbacks(event: MessageEvent):
         else:
             if is_like:
                 try:
+                    likes_cnt = await db.count_incoming_likes(tid)
+                    people_str = format_people_dative(max(1, likes_cnt))
+                    already = "уже " if likes_cnt > 1 else ""
                     vkb = Keyboard(inline=True)
-                    vkb.add(Callback("👀 Посмотреть, кто это", payload={"cmd": "view_likes"}), color=KeyboardButtonColor.POSITIVE)
+                    vkb.add(Callback("👀 Посмотреть, кто там", payload={"cmd": "view_likes"}), color=KeyboardButtonColor.POSITIVE)
                     await bot.api.messages.send(
                         peer_id=tid,
-                        message="💘 Твоя анкета кому-то понравилась! Заканчивай с просмотром и давай посмотрим, кто поставил лайк 👇",
+                        message=f"💘 Твоя анкета понравилась {already}{people_str}! Заканчивай с просмотром и давай посмотрим, кто там 👇",
                         keyboard=vkb.get_json(),
                         random_id=0
                     )
