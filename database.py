@@ -145,15 +145,26 @@ async def get_next_profile(user_id):
         def sort_key(p):
             p_age = p.get("age", 20)
             in_range = 0 if (my_age - 2 <= p_age <= my_age + 3) else 1
-            age_diff = abs(p_age - my_age)
             dist = calc_distance_num(me.get("lat"), me.get("lon"), p.get("lat"), p.get("lon"))
-            return (in_range, dist, age_diff)
+            return (in_range, dist, abs(p_age - my_age))
 
         profiles.sort(key=sort_key)
         best = next(iter(profiles))
         best["distance_str"] = format_place(me, best)
         return best
 
+async def count_incoming_likes(user_id) -> int:
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute("""
+            SELECT COUNT(*) FROM likes l
+            JOIN users u ON u.user_id = l.from_user
+            WHERE l.to_user = ?
+              AND l.is_like = 1
+              AND u.is_banned = 0
+              AND u.user_id NOT IN (SELECT to_user FROM likes WHERE from_user = ?)
+        """, (user_id, user_id))
+        row = await cursor.fetchone()
+        return row if row else 0
 
 async def get_incoming_like(user_id):
     me = await get_user(user_id)
